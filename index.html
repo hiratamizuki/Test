@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>サポートトレーナーAR（試作）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700&display=swap" rel="stylesheet">
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+    "mindar-image-three": "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js"
+  }
+}
+</script>
+<style>
+  :root {
+    --hoodie: #F7F7FA;
+    --ink: #26252E;
+    --violet: #6B4FE0;
+    --lilac: #ECE7FF;
+    --muted: #6F6C7D;
+    --surface: #FFFFFF;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --hoodie: #1E1D25;
+      --ink: #F2F1F7;
+      --violet: #9C86FF;
+      --lilac: #2C2742;
+      --muted: #B1AEC0;
+      --surface: #26252E;
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
+  body {
+    font-family: "Zen Maru Gothic", "Hiragino Maru Gothic ProN", "Hiragino Sans", "Noto Sans JP", sans-serif;
+    color: var(--ink);
+  }
+  #ar, #demo { position: fixed; inset: 0; }
+  #demo canvas { display: block; width: 100%; height: 100%; }
+
+  /* Start screen */
+  #start {
+    position: fixed; inset: 0; z-index: 20; overflow-y: auto;
+    background: var(--hoodie);
+    padding: calc(env(safe-area-inset-top, 0px) + 28px) 24px calc(env(safe-area-inset-bottom, 0px) + 28px);
+  }
+  .start-inner { max-width: 440px; margin: 0 auto; }
+  #start h1 { font-size: 1.75rem; line-height: 1.3; margin: 0 0 12px; font-weight: 700; }
+  #start p { line-height: 1.7; margin: 0 0 16px; }
+  .target {
+    display: flex; gap: 14px; align-items: center;
+    background: var(--lilac); border-radius: 18px; padding: 12px; margin: 20px 0;
+  }
+  .target img { width: 96px; border-radius: 10px; background: #fff; flex: none; }
+  .target span { font-size: .9rem; line-height: 1.6; }
+  fieldset { border: 0; padding: 0; margin: 0 0 22px; }
+  legend { font-weight: 700; margin-bottom: 8px; }
+  .seg { display: flex; background: var(--surface); border-radius: 999px; padding: 4px; border: 1.5px solid var(--lilac); }
+  .seg label { flex: 1; text-align: center; padding: 10px 6px; border-radius: 999px; cursor: pointer; font-size: .92rem; }
+  .seg input { position: absolute; opacity: 0; pointer-events: none; }
+  .seg input:checked + span { color: #fff; }
+  .seg label:has(input:checked) { background: var(--violet); color: #fff; }
+  .seg label:has(input:focus-visible) { outline: 3px solid var(--violet); outline-offset: 2px; }
+  button {
+    font: inherit; font-weight: 700; border: 0; cursor: pointer; border-radius: 999px;
+    padding: 15px 22px; width: 100%; font-size: 1.05rem;
+  }
+  button:focus-visible { outline: 3px solid var(--violet); outline-offset: 3px; }
+  .primary { background: var(--violet); color: #fff; margin-bottom: 10px; }
+  .secondary { background: transparent; color: var(--ink); border: 1.5px solid var(--muted); }
+  .note { font-size: .82rem; color: var(--muted); margin-top: 18px !important; }
+
+  /* AR overlays */
+  #scan {
+    position: fixed; z-index: 10; left: 50%; top: calc(env(safe-area-inset-top, 0px) + 20px);
+    transform: translateX(-50%);
+    display: flex; align-items: center; gap: 10px;
+    background: rgba(255,255,255,.92); color: #26252E;
+    padding: 8px 16px 8px 8px; border-radius: 999px; font-size: .9rem; white-space: nowrap;
+  }
+  #scan img { width: 40px; height: 40px; object-fit: cover; border-radius: 8px; }
+  #bubble {
+    position: fixed; z-index: 10; left: 16px; right: 16px;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 20px);
+    max-width: 520px; margin: 0 auto;
+    background: #fff; color: #26252E; border-radius: 22px; padding: 22px 20px 16px;
+    box-shadow: 0 6px 24px rgba(38,37,46,.25);
+  }
+  #bubble .name {
+    position: absolute; top: -13px; left: 18px;
+    background: #6B4FE0; color: #fff; font-weight: 700; font-size: .85rem;
+    padding: 4px 14px; border-radius: 999px;
+  }
+  #bubble .line { margin: 0; font-size: 1.08rem; line-height: 1.6; font-weight: 500; }
+  #bubble .count { font-size: 2rem; font-weight: 700; color: #6B4FE0; margin-left: .3em; }
+  #again {
+    position: fixed; z-index: 11; right: 16px; width: auto;
+    top: calc(env(safe-area-inset-top, 0px) + 16px);
+    background: #6B4FE0; color: #fff; padding: 10px 18px; font-size: .95rem;
+  }
+  #error {
+    position: fixed; z-index: 30; inset: auto 16px calc(env(safe-area-inset-bottom, 0px) + 20px);
+    background: #fff; color: #26252E; border-radius: 16px; padding: 16px; line-height: 1.6;
+    border-left: 6px solid #D6455A;
+  }
+</style>
+</head>
+<body>
+<div id="ar"></div>
+<div id="demo" hidden></div>
+
+<section id="start">
+  <div class="start-inner">
+    <h1>サポートトレーナーと<br>一緒に運動しよう</h1>
+    <p>下の画像をカメラに映すと、トレーナーが現れてあいさつし、腕立て伏せと腹筋をやってみせます。音声が出るので音量を確認してください。</p>
+    <div class="target">
+      <img src="./target.png" alt="カメラに映す画像">
+      <span>この画像を印刷するか、別の画面に表示してカメラに映します。</span>
+    </div>
+    <fieldset>
+      <legend>画像の置き方</legend>
+      <div class="seg">
+        <label><input type="radio" name="place" value="floor" checked><span>床や机に置く</span></label>
+        <label><input type="radio" name="place" value="wall"><span>壁に貼る</span></label>
+      </div>
+    </fieldset>
+    <button class="primary" id="btnAR">カメラで始める</button>
+    <button class="secondary" id="btnDemo">画像なしで動きを確認</button>
+    <p class="note">床置きの場合は、画像の下辺側からのぞくとトレーナーがこちらを向きます。</p>
+  </div>
+</section>
+
+<div id="scan" hidden><img src="./target.png" alt="">画像をカメラに映してください</div>
+<div id="bubble" hidden><span class="name"></span><p class="line"></p></div>
+<button id="again" hidden>もう一度</button>
+<div id="error" hidden></div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+/* ===== 設定 ===== */
+const TRAINER_NAME = '〇〇';          // トレーナーの名前
+const SPOKEN_NAME  = 'まるまる';      // 読み上げ用の読み方
+const STEPS = [
+  { anim: 'wave',  say: `こんにちは！サポートトレーナーの${TRAINER_NAME}です！` },
+  { anim: 'talk',  say: 'これから一緒に運動しよう！体を動かすと、気分もすっきりするよ。' },
+  { anim: 'fist',  say: 'まずは腕立て伏せ！一緒に5回やってみよう！' },
+  { anim: 'pushup', label: '腕立て伏せ', reps: 5, period: 2.0 },
+  { anim: 'talk',  say: 'ナイス！つぎは腹筋だよ。' },
+  { anim: 'situp', label: '腹筋', reps: 5, period: 2.2 },
+  { anim: 'cheer', say: 'おつかれさま！よくがんばったね！' },
+  { anim: 'idle',  end: true },
+];
+const KAZU = ['いち', 'に', 'さん', 'よん', 'ご', 'ろく', 'なな', 'はち', 'きゅう', 'じゅう'];
+
+/* ===== 仮キャラクター（あとでVRMに差し替える部分） ===== */
+const C = {
+  skin: 0xf6d8c6, hair: 0x4b3024, hoodie: 0xf3f3f7, dark: 0x2b2a33, trim: 0xffffff,
+  stripe: 0x9a98a8, shoe: 0x24232b, violet: 0x6b4fe0, sole: 0xf4f4f8, eye: 0x463166,
+  mouth: 0xb5455a, zip: 0xb8b8c4, blush: 0xf59aa8,
+};
+const matCache = {};
+const mat = c => (matCache[c] ??= new THREE.MeshToonMaterial({ color: c }));
+function mesh(geo, color, pos = [0, 0, 0], scale, rot) {
+  const m = new THREE.Mesh(geo, mat(color));
+  m.position.set(...pos);
+  if (scale) m.scale.set(...scale);
+  if (rot) m.rotation.set(...rot);
+  return m;
+}
+function group(parent, pos = [0, 0, 0]) {
+  const g = new THREE.Group(); g.position.set(...pos); parent.add(g); return g;
+}
+const capsule = (r, l) => new THREE.CapsuleGeometry(r, l, 6, 14);
+const sphere = r => new THREE.SphereGeometry(r, 20, 14);
+
+const LEG_LEN = 0.544;   // 股関節の原点から靴底まで
+const SH_H = 0.252;      // 背骨原点から肩まで
+const ARM_A = 0.16, ARM_B = 0.15;
+
+function buildTrainer() {
+  const J = {};
+  J.root = new THREE.Group();
+  J.hips = group(J.root, [0, LEG_LEN, 0]);
+  // ショートパンツ
+  J.hips.add(mesh(new THREE.CylinderGeometry(0.1, 0.112, 0.11, 20), C.dark, [0, -0.025, 0], [1, 1, 0.8]));
+  // 上半身
+  J.spine = group(J.hips);
+  J.spine.add(mesh(new THREE.CylinderGeometry(0.108, 0.096, 0.27, 20), C.hoodie, [0, 0.15, 0], [1, 1, 0.75]));
+  J.spine.add(mesh(sphere(0.1), C.hoodie, [0, 0.2, 0], [1.02, 0.75, 0.78]));
+  J.spine.add(mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.025, 20), C.hoodie, [0, 0.02, 0], [1, 1, 0.8]));
+  J.spine.add(mesh(new THREE.BoxGeometry(0.006, 0.25, 0.006), C.zip, [0, 0.14, 0.079]));
+  J.spine.add(mesh(sphere(0.075), C.hoodie, [0, 0.255, -0.07], [1.1, 0.75, 0.7]));   // フード
+  J.spine.add(mesh(sphere(0.06), C.hoodie, [0, 0.255, 0], [2.2, 0.7, 1]));           // 肩
+  // 首と頭
+  J.neck = group(J.spine, [0, 0.285, 0]);
+  J.neck.add(mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.06, 12), C.skin, [0, 0.02, 0]));
+  const head = group(J.neck, [0, 0.05, 0]);
+  head.add(mesh(new THREE.SphereGeometry(0.085, 28, 20), C.skin, [0, 0.07, 0.005], [0.95, 1.05, 0.98]));
+  head.add(mesh(new THREE.SphereGeometry(0.094, 28, 18, 0, Math.PI * 2, 0, Math.PI * 0.55), C.hair, [0, 0.075, -0.006], null, [-0.35, 0, 0]));
+  head.add(mesh(sphere(0.088), C.hair, [0, 0.06, -0.03], [1, 1.05, 0.9]));
+  for (const x of [-0.04, 0, 0.04]) head.add(mesh(sphere(0.035), C.hair, [x, 0.125, 0.06], [1.1, 0.9, 0.6], [0, 0, x * 3]));
+  for (const s of [1, -1]) {
+    head.add(mesh(capsule(0.018, 0.06), C.hair, [s * 0.075, 0.03, 0.03]));
+    head.add(mesh(sphere(0.016), C.eye, [s * 0.032, 0.062, 0.086], [0.85, 1.25, 0.45]));
+    head.add(mesh(sphere(0.005), 0xffffff, [s * 0.028, 0.072, 0.094]));
+    const blush = mesh(sphere(0.012), C.blush, [s * 0.052, 0.045, 0.07], [1.4, 0.6, 0.3]);
+    blush.material = new THREE.MeshBasicMaterial({ color: C.blush, transparent: true, opacity: 0.45 });
+    head.add(blush);
+  }
+  J.mouth = mesh(sphere(0.013), C.mouth, [0, 0.022, 0.077], [1.3, 0.45, 0.5]);
+  head.add(J.mouth);
+  // ポニーテール
+  J.tail = group(head, [0, 0.13, -0.075]);
+  J.tail.add(mesh(new THREE.TorusGeometry(0.02, 0.008, 8, 16), C.violet, [0, 0, 0], null, [Math.PI / 2, 0, 0]));
+  J.tail.add(mesh(capsule(0.032, 0.13), C.hair, [0, -0.08, -0.03], [1, 1, 0.85], [0.35, 0, 0]));
+  // 腕
+  for (const [side, s] of [['L', 1], ['R', -1]]) {
+    const arm = group(J.spine, [s * 0.125, SH_H, 0]);
+    arm.add(mesh(capsule(0.033, 0.11), C.hoodie, [0, -0.08, 0]));
+    const elbow = group(arm, [0, -ARM_A, 0]);
+    elbow.add(mesh(capsule(0.029, 0.1), C.hoodie, [0, -0.07, 0]));
+    elbow.add(mesh(sphere(0.028), C.skin, [0, -ARM_B, 0], [0.9, 1.1, 0.8]));
+    J['arm' + side] = arm; J['elbow' + side] = elbow;
+  }
+  // 脚
+  for (const [side, s] of [['L', 1], ['R', -1]]) {
+    const leg = group(J.hips, [s * 0.058, -0.04, 0]);
+    leg.add(mesh(new THREE.CylinderGeometry(0.06, 0.062, 0.08, 16), C.dark, [0, -0.02, 0]));
+    leg.add(mesh(new THREE.CylinderGeometry(0.063, 0.063, 0.012, 16), C.trim, [0, -0.062, 0]));
+    leg.add(mesh(capsule(0.05, 0.14), C.dark, [0, -0.115, 0]));
+    leg.add(mesh(new THREE.BoxGeometry(0.006, 0.16, 0.014), C.stripe, [s * 0.045, -0.13, 0], null, [0, 0, s * 0.12]));
+    const knee = group(leg, [0, -0.23, 0]);
+    knee.add(mesh(capsule(0.039, 0.15), C.dark, [0, -0.11, 0]));
+    knee.add(mesh(new THREE.BoxGeometry(0.006, 0.15, 0.014), C.stripe, [s * 0.034, -0.11, 0.01], null, [0, 0, -s * 0.1]));
+    const foot = group(knee, [0, -0.22, 0]);
+    foot.add(mesh(new THREE.BoxGeometry(0.075, 0.05, 0.14), C.shoe, [0, -0.018, 0.03]));
+    foot.add(mesh(new THREE.BoxGeometry(0.077, 0.02, 0.05), C.violet, [0, -0.02, 0.05]));
+    foot.add(mesh(new THREE.BoxGeometry(0.08, 0.018, 0.145), C.sole, [0, -0.045, 0.03]));
+    J['leg' + side] = leg; J['knee' + side] = knee; J['foot' + side] = foot;
+  }
+  return J;
+}
+
+/* ===== ポーズとアニメーション ===== */
+const KEYS = ['rootRy', 'hipsY', 'hipsZ', 'hipsRx', 'spineRx', 'spineRz', 'neckRx', 'neckRy', 'neckRz',
+  'armLx', 'armLz', 'elbowLx', 'elbowLz', 'armRx', 'armRz', 'elbowRx', 'elbowRz',
+  'legLx', 'legLz', 'kneeL', 'footL', 'legRx', 'legRz', 'kneeR', 'footR', 'tail'];
+
+function basePose(t) {
+  const b = Math.sin(t * 2.2);
+  return {
+    rootRy: 0, hipsY: LEG_LEN + 0.004 * b, hipsZ: 0, hipsRx: 0, spineRx: 0.015 * b, spineRz: 0,
+    neckRx: 0, neckRy: 0, neckRz: 0,
+    armLx: 0, armLz: 0.12, elbowLx: -0.15, elbowLz: 0,
+    armRx: 0, armRz: -0.12, elbowRx: -0.15, elbowRz: 0,
+    legLx: 0, legLz: 0.03, kneeL: 0, footL: 0, legRx: 0, legRz: -0.03, kneeR: 0, footR: 0,
+    tail: 0.08 * Math.sin(t * 1.7),
+  };
+}
+const handOnHipL = p => Object.assign(p, { armLx: 0.1, armLz: 0.6, elbowLx: 0, elbowLz: -1.55 });
+
+// 腕の2関節IK（体の前後方向の平面で計算）
+const dirAngle = (y, z) => Math.atan2(-z, -y);
+function armIK(shY, shZ, handY, handZ, bodyAngle) {
+  const dy = handY - shY, dz = handZ - shZ;
+  const c = Math.cos(bodyAngle), s = Math.sin(bodyAngle);
+  const by = dy * c + dz * s, bz = -dy * s + dz * c;
+  const d = Math.min(Math.hypot(by, bz), ARM_A + ARM_B - 1e-3);
+  const a = Math.acos((ARM_A * ARM_A + d * d - ARM_B * ARM_B) / (2 * ARM_A * d));
+  const b1 = dirAngle(by, bz) + a;
+  const ey = -ARM_A * Math.cos(b1), ez = -ARM_A * Math.sin(b1);
+  const b2 = dirAngle(by - ey, bz - ez);
+  return { upper: b1, elbow: b2 - b1 };
+}
+
+const PREP = 1.2;   // 運動前の姿勢移行時間
+const wave01 = (t, period) => t < PREP ? 0 : (1 - Math.cos(2 * Math.PI * (t - PREP) / period)) / 2;
+
+const ANIMS = {
+  idle: t => handOnHipL(basePose(t)),
+  wave: t => Object.assign(handOnHipL(basePose(t)), {
+    armRx: -0.15, armRz: -2.45, elbowRx: -0.2, elbowRz: -0.35 + 0.35 * Math.sin(t * 9),
+    neckRz: 0.12, neckRy: 0.1,
+  }),
+  talk: t => Object.assign(handOnHipL(basePose(t)), {
+    armRx: -0.45 + 0.12 * Math.sin(t * 2.3), armRz: -0.25,
+    elbowRx: -1.25 + 0.25 * Math.sin(t * 3.1), elbowRz: 0.2,
+    neckRx: 0.05 * Math.sin(t * 3), neckRy: 0.12 * Math.sin(t * 1.2), spineRz: 0.03 * Math.sin(t * 1.2),
+  }),
+  fist: t => {
+    const p = handOnHipL(basePose(t));
+    const k = Math.abs(Math.sin(t * 6));
+    return Object.assign(p, {
+      armRx: -0.35, armRz: -0.35, elbowRx: -2.1 - 0.15 * k,
+      hipsY: LEG_LEN + 0.008 * k, neckRz: -0.08,
+    });
+  },
+  cheer: t => {
+    const p = basePose(t);
+    const j = Math.max(0, Math.sin(t * 5));
+    return Object.assign(p, {
+      armLx: -0.1, armLz: 2.75, elbowLz: 0.2, armRx: -0.1, armRz: -2.75, elbowRz: -0.2,
+      hipsY: LEG_LEN + 0.05 * j - 0.01, kneeL: 0.15 * (1 - j), kneeR: 0.15 * (1 - j),
+      legLx: -0.08 * (1 - j), legRx: -0.08 * (1 - j), neckRx: -0.15,
+    });
+  },
+  pushup: (t, step) => {
+    const A_UP = 1.14, A_DOWN = 1.38, ZT = -0.42;
+    const s = wave01(t, step.period);
+    const ang = A_UP + (A_DOWN - A_UP) * s;
+    const hipsY = LEG_LEN * Math.cos(ang), hipsZ = ZT + LEG_LEN * Math.sin(ang);
+    const shY = hipsY + SH_H * Math.cos(ang), shZ = hipsZ + SH_H * Math.sin(ang);
+    const handZ = ZT + (LEG_LEN + SH_H) * Math.sin(A_UP) + 0.02;
+    const ik = armIK(shY, shZ, 0.028, handZ, ang);
+    return Object.assign(basePose(0), {
+      rootRy: Math.PI / 2, hipsY, hipsZ, hipsRx: ang, spineRx: 0, neckRx: -0.45,
+      armLx: ik.upper, armLz: 0.12, elbowLx: ik.elbow, elbowLz: 0,
+      armRx: ik.upper, armRz: -0.12, elbowRx: ik.elbow, elbowRz: 0,
+      footL: -0.35, footR: -0.35, tail: -0.3,
+    });
+  },
+  situp: (t, step) => {
+    const s = wave01(t, step.period);
+    return Object.assign(basePose(0), {
+      rootRy: Math.PI / 2, hipsY: 0.12, hipsZ: 0.1, hipsRx: 0,
+      spineRx: -1.45 + 1.05 * s, neckRx: 0.35 - 0.1 * s,
+      armLx: -1.15 - 0.35 * s, armLz: 0.15, elbowLx: -0.1, elbowLz: 0,
+      armRx: -1.15 - 0.35 * s, armRz: -0.15, elbowRx: -0.1, elbowRz: 0,
+      legLx: -2.36, legRx: -2.36, legLz: 0.05, legRz: -0.05,
+      kneeL: 1.94, kneeR: 1.94, footL: 0.42, footR: 0.42, tail: 0,
+    });
+  },
+};
+
+function applyPose(J, p) {
+  J.root.rotation.y = p.rootRy;
+  J.hips.position.set(0, p.hipsY, p.hipsZ);
+  J.hips.rotation.x = p.hipsRx;
+  J.spine.rotation.set(p.spineRx, 0, p.spineRz);
+  J.neck.rotation.set(p.neckRx, p.neckRy, p.neckRz);
+  J.armL.rotation.set(p.armLx, 0, p.armLz);
+  J.elbowL.rotation.set(p.elbowLx, 0, p.elbowLz);
+  J.armR.rotation.set(p.armRx, 0, p.armRz);
+  J.elbowR.rotation.set(p.elbowRx, 0, p.elbowRz);
+  J.legL.rotation.set(p.legLx, 0, p.legLz);
+  J.legR.rotation.set(p.legRx, 0, p.legRz);
+  J.kneeL.rotation.x = p.kneeL; J.kneeR.rotation.x = p.kneeR;
+  J.footL.rotation.x = p.footL; J.footR.rotation.x = p.footR;
+  J.tail.rotation.x = p.tail;
+}
+
+/* ===== 音声 ===== */
+let jaVoice = null, speaking = false, speechToken = 0;
+const hasSpeech = 'speechSynthesis' in window;
+function pickVoice() {
+  if (!hasSpeech) return;
+  const vs = speechSynthesis.getVoices();
+  jaVoice = vs.find(v => /^ja/i.test(v.lang) && /Kyoko|Nanami|Haruka|O-ren|Female/i.test(v.name))
+    || vs.find(v => /^ja/i.test(v.lang)) || null;
+}
+if (hasSpeech) { pickVoice(); speechSynthesis.onvoiceschanged = pickVoice; }
+
+function speak(text, onEnd) {
+  const token = ++speechToken;
+  if (!hasSpeech) return;
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text.replaceAll(TRAINER_NAME, SPOKEN_NAME));
+  u.lang = 'ja-JP';
+  if (jaVoice) u.voice = jaVoice;
+  u.rate = 1.05; u.pitch = 1.35;
+  u.onstart = () => { if (token === speechToken) speaking = true; };
+  const finish = failed => {
+    if (token !== speechToken) return;
+    speaking = false;
+    onEnd && onEnd(failed);
+  };
+  u.onend = () => finish(false);
+  u.onerror = () => finish(true);
+  speechSynthesis.speak(u);
+}
+function unlockSpeech() {
+  if (!hasSpeech) return;
+  const u = new SpeechSynthesisUtterance(' ');
+  u.volume = 0;
+  speechSynthesis.speak(u);
+}
+
+/* ===== 進行管理 ===== */
+const $ = id => document.getElementById(id);
+const bubble = $('bubble'), bubbleName = bubble.querySelector('.name'), bubbleLine = bubble.querySelector('.line');
+bubbleName.textContent = TRAINER_NAME;
+
+const J = buildTrainer();
+const stage = new THREE.Group();
+stage.add(J.root);
+const shadow = new THREE.Mesh(
+  new THREE.CircleGeometry(0.3, 40),
+  new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.16, depthWrite: false })
+);
+shadow.rotation.x = -Math.PI / 2; shadow.position.y = 0.002;
+stage.add(shadow);
+
+let animName = 'idle', animT = 0, fromPose = null, blendDur = 0.6, curPose = ANIMS.idle(0);
+let stepIdx = -1, stepT = 0, speechDone = false, speechFailed = false, speechDoneAt = 0, lastCount = 0;
+let visible = false, clockTime = 0;
+
+function setAnim(name, dur) {
+  fromPose = { ...curPose }; animName = name; animT = 0; blendDur = dur;
+}
+function showLine(html) { bubble.hidden = false; bubbleLine.innerHTML = html; }
+const est = text => Math.max(2.5, text.length * 0.17);
+
+function startStep(i) {
+  stepIdx = i; stepT = 0;
+  const st = STEPS[i];
+  const heavy = ['pushup', 'situp'].includes(st.anim) || ['pushup', 'situp'].includes(animName);
+  setAnim(st.anim, heavy ? PREP : 0.6);
+  $('again').hidden = true;
+  if (st.say) {
+    speechDone = false;
+    showLine(st.say);
+    speechFailed = !hasSpeech;
+    speak(st.say, failed => { speechDone = true; speechDoneAt = stepT; if (failed) speechFailed = true; });
+  }
+  if (st.reps) {
+    lastCount = 0;
+    showLine(`${st.label}<span class="count">0 / ${st.reps}</span>`);
+  }
+  if (st.end) {
+    bubble.hidden = true;
+    $('again').hidden = false;
+  }
+}
+
+function updateSequence(dt) {
+  if (stepIdx < 0) return;
+  const st = STEPS[stepIdx];
+  stepT += dt;
+  if (st.say) {
+    // 読み上げ終了、または読み上げが使えない／終了通知が来ない場合の保険
+    const fallback = hasSpeech ? est(st.say) + 3 : est(st.say);
+    if (!speechDone && stepT > fallback) { speechDone = true; speechDoneAt = stepT; speaking = false; }
+    // 読み上げが失敗した場合は字幕を読める時間だけ待つ
+    const minT = speechFailed ? est(st.say) : 0;
+    if (speechDone && stepT - speechDoneAt > 0.5 && stepT > minT) startStep(stepIdx + 1);
+  } else if (st.reps) {
+    const te = stepT - PREP;
+    const c = Math.min(st.reps, Math.max(0, Math.floor(te / st.period + 0.5)));
+    if (c > lastCount) {
+      lastCount = c;
+      speak(KAZU[c - 1] ?? String(c));
+      showLine(`${st.label}<span class="count">${c} / ${st.reps}</span>`);
+    }
+    if (te > st.reps * st.period + 0.4) startStep(stepIdx + 1);
+  }
+}
+
+const ease = k => k * k * (3 - 2 * k);
+function tick(dt, active) {
+  clockTime += dt;
+  if (active) { updateSequence(dt); animT += dt; }
+  const st = STEPS[stepIdx] || {};
+  const target = ANIMS[animName](animT, st);
+  if (fromPose && animT < blendDur) {
+    const k = ease(animT / blendDur);
+    const p = {};
+    for (const key of KEYS) p[key] = fromPose[key] + (target[key] - fromPose[key]) * k;
+    curPose = p;
+  } else {
+    curPose = target;
+  }
+  applyPose(J, curPose);
+  const open = speaking ? 0.45 + 0.6 * Math.abs(Math.sin(clockTime * 17)) : 0.45;
+  J.mouth.scale.y = open;
+}
+
+function addLights(scene) {
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x9b93c9, 2.0));
+  const d = new THREE.DirectionalLight(0xffffff, 2.0);
+  d.position.set(0.6, 1.2, 1.0);
+  scene.add(d);
+}
+
+const placement = () => document.querySelector('input[name="place"]:checked').value;
+
+/* ===== AR モード ===== */
+async function startAR() {
+  unlockSpeech();
+  $('start').hidden = true;
+  $('scan').hidden = false;
+  try {
+    const { MindARThree } = await import('mindar-image-three');
+    const mindar = new MindARThree({
+      container: $('ar'), imageTargetSrc: './targets.mind',
+      uiLoading: 'no', uiScanning: 'no', uiError: 'no',
+      filterMinCF: 0.0001, filterBeta: 0.001,
+    });
+    const { renderer, scene, camera } = mindar;
+    addLights(scene);
+    if (placement() === 'floor') {
+      stage.rotation.set(Math.PI / 2, 0, 0); stage.position.set(0, 0, 0);
+    } else {
+      stage.rotation.set(0, 0, 0); stage.position.set(0, -0.45, 0.05);
+    }
+    stage.scale.setScalar(0.9);
+    const anchor = mindar.addAnchor(0);
+    anchor.group.add(stage);
+    anchor.onTargetFound = () => {
+      visible = true; $('scan').hidden = true;
+      if (stepIdx < 0) startStep(0);
+    };
+    anchor.onTargetLost = () => { visible = false; $('scan').hidden = false; };
+    await mindar.start();
+    const clock = new THREE.Clock();
+    renderer.setAnimationLoop(() => {
+      tick(Math.min(clock.getDelta(), 0.05), visible);
+      renderer.render(scene, camera);
+    });
+  } catch (e) {
+    console.error(e);
+    $('scan').hidden = true;
+    $('error').hidden = false;
+    $('error').textContent = 'カメラを起動できませんでした。https:// のページで開き、ブラウザでカメラの使用を許可してから再読み込みしてください。';
+  }
+}
+
+/* ===== 画像なしの確認モード ===== */
+function startDemo() {
+  unlockSpeech();
+  $('start').hidden = true;
+  const box = $('demo'); box.hidden = false;
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  box.appendChild(renderer.domElement);
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0xeeeaf8);
+  addLights(scene);
+  const floor = new THREE.Mesh(new THREE.CircleGeometry(1.2, 64), new THREE.MeshToonMaterial({ color: 0xdcd5f2 }));
+  floor.rotation.x = -Math.PI / 2;
+  scene.add(floor);
+  scene.add(stage);
+  const camera = new THREE.PerspectiveCamera(35, 1, 0.01, 50);
+  camera.position.set(0, 0.8, 2.6);
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.target.set(0, 0.45, 0);
+  controls.enableDamping = true;
+  controls.update();
+  const resize = () => {
+    renderer.setSize(innerWidth, innerHeight);
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+  };
+  addEventListener('resize', resize); resize();
+  visible = true;
+  startStep(0);
+  const clock = new THREE.Clock();
+  renderer.setAnimationLoop(() => {
+    tick(Math.min(clock.getDelta(), 0.05), true);
+    controls.update();
+    renderer.render(scene, camera);
+  });
+}
+
+$('btnAR').addEventListener('click', startAR);
+$('btnDemo').addEventListener('click', startDemo);
+$('again').addEventListener('click', () => { unlockSpeech(); startStep(0); });
+</script>
+</body>
+</html>
